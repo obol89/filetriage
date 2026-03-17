@@ -19,10 +19,11 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python build.py
       - run: chmod +x dist/filetriage
+      - run: tar czf dist/filetriage-linux.tar.gz -C dist filetriage
       - uses: actions/upload-artifact@v4
         with:
           name: filetriage-linux
-          path: dist/filetriage
+          path: dist/filetriage-linux.tar.gz
 
   build-windows:
     runs-on: windows-latest
@@ -48,10 +49,11 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python build.py
       - run: chmod +x dist/filetriage
+      - run: tar czf dist/filetriage-macos.tar.gz -C dist filetriage
       - uses: actions/upload-artifact@v4
         with:
           name: filetriage-macos
-          path: dist/filetriage
+          path: dist/filetriage-macos.tar.gz
 
   release:
     needs: [build-linux, build-windows, build-macos]
@@ -70,8 +72,10 @@ jobs:
           name: filetriage-macos
           path: artifacts/macos
       - run: |
+          tar xzf artifacts/linux/filetriage-linux.tar.gz -C artifacts/linux
           mv artifacts/linux/filetriage artifacts/filetriage-linux
           mv artifacts/windows/filetriage.exe artifacts/filetriage-windows.exe
+          tar xzf artifacts/macos/filetriage-macos.tar.gz -C artifacts/macos
           mv artifacts/macos/filetriage artifacts/filetriage-macos
       - uses: softprops/action-gh-release@v2
         with:
