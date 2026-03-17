@@ -11,7 +11,7 @@ def main() -> None:
     system = platform.system()
     if system == "Windows":
         name = "filetriage.exe"
-    elif system == "Linux":
+    elif system in ("Linux", "Darwin"):
         name = "filetriage"
     else:
         name = "filetriage"
@@ -37,7 +37,12 @@ def main() -> None:
     dist = Path("dist") / name
     print()
     print(f"Build complete: {dist.resolve()}")
-    print(f"Run it with:    ./{name}" if system != "Windows" else f"Run it with:    {name}")
+    if system == "Windows":
+        print(f"Run it with:    {name}")
+    elif system == "Darwin":
+        print(f"Run it with:    chmod +x {dist} && ./{name}")
+    else:
+        print(f"Run it with:    ./{name}")
 
 
 if __name__ == "__main__":
