@@ -27,34 +27,55 @@ case "$ARCH" in
 esac
 
 DOWNLOAD_URL="${BASE_URL}/${ASSET}"
-DEST="./filetriage"
+INSTALL_DIR="/usr/local/bin"
+INSTALL_PATH="${INSTALL_DIR}/filetriage"
+TMPFILE="$(mktemp)"
 
 echo "Detected: $OS ($ARCH)"
 echo "Downloading $ASSET ..."
 
 # Download using curl or wget
 if command -v curl >/dev/null 2>&1; then
-    curl -fSL -o "$DEST" "$DOWNLOAD_URL"
+    curl -fSL -o "$TMPFILE" "$DOWNLOAD_URL"
 elif command -v wget >/dev/null 2>&1; then
-    wget -q -O "$DEST" "$DOWNLOAD_URL"
+    wget -q -O "$TMPFILE" "$DOWNLOAD_URL"
 else
     echo "Error: Neither curl nor wget found. Please install one and try again."
+    rm -f "$TMPFILE"
     exit 1
 fi
 
-chmod +x "$DEST"
-echo "Downloaded to $(pwd)/filetriage"
+chmod +x "$TMPFILE"
 
-# Offer to install system-wide
-printf "Move to /usr/local/bin/filetriage for system-wide access? [Y/n] "
-read -r answer
-case "$answer" in
-    [nN]*)
-        echo "Done. Run it with: ./filetriage"
-        ;;
-    *)
-        sudo mv "$DEST" /usr/local/bin/filetriage
-        echo "Installed to /usr/local/bin/filetriage"
-        echo "Run it with: filetriage"
-        ;;
-esac
+# Check for existing install
+if [ -f "$INSTALL_PATH" ]; then
+    printf "filetriage already exists at %s. Overwrite? [Y/n] " "$INSTALL_PATH"
+    read -r answer
+    case "$answer" in
+        [nN]*)
+            echo "Aborted. Existing binary left unchanged."
+            rm -f "$TMPFILE"
+            exit 0
+            ;;
+    esac
+fi
+
+# Install to /usr/local/bin
+echo "Installing to $INSTALL_PATH ..."
+
+if [ -w "$INSTALL_DIR" ]; then
+    cp "$TMPFILE" "$INSTALL_PATH"
+else
+    echo "Note: $INSTALL_DIR is not writable by your user, using sudo."
+    if ! sudo cp "$TMPFILE" "$INSTALL_PATH"; then
+        echo "Error: sudo failed. You can manually copy the binary:"
+        echo "  sudo cp $TMPFILE $INSTALL_PATH"
+        exit 1
+    fi
+fi
+
+rm -f "$TMPFILE"
+
+echo ""
+echo "Installed to $INSTALL_PATH"
+echo "Run it with: filetriage"
