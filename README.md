@@ -17,6 +17,16 @@ Interactive TUI for reviewing and deleting old files and directories on Linux, W
 - Graceful handling of permission errors on all platforms
 - Builds to a single portable binary via PyInstaller
 
+## Quick install (Linux / macOS)
+
+```sh
+curl -fsSL https://github.com/obol89/filetriage/releases/latest/download/install.sh | bash
+```
+
+This downloads the latest binary for your platform and optionally installs it to `/usr/local/bin`. No Python required.
+
+For manual download, grab the binary from the [Releases](https://github.com/obol89/filetriage/releases) page, `chmod +x` it, and run.
+
 ## Requirements
 
 - Python 3.8+
@@ -83,13 +93,13 @@ GitHub Actions automatically builds binaries for Linux, Windows, and macOS on ea
 
 ## Keyboard shortcuts
 
-| Key | Action                                   |
-|-----|------------------------------------------|
-| `d` | Delete the current item                  |
+| Key | Action                                    |
+|-----|-------------------------------------------|
+| `d` | Delete the current item                   |
 | `D` | Super delete — remove the parent directory |
-| `k` | Keep the current item                    |
-| `l` | Defer to later (re-queue to the end)     |
-| `q` | Quit and show summary                    |
+| `k` | Keep the current item                     |
+| `l` | Defer to later (re-queue to the end)      |
+| `q` | Quit and show summary                     |
 
 When deleting a non-empty directory, press `Enter` to confirm or `Esc` to cancel.
 
