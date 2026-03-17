@@ -23,7 +23,7 @@ Interactive TUI for reviewing and deleting old files and directories on Linux, W
 curl -fsSL https://github.com/obol89/filetriage/releases/latest/download/install.sh | bash
 ```
 
-This downloads the latest binary for your platform and optionally installs it to `/usr/local/bin`. No Python required.
+This downloads the latest binary for your platform and installs it to `/usr/local/bin/filetriage` (using sudo if needed). No Python required.
 
 For manual download, grab the binary from the [Releases](https://github.com/obol89/filetriage/releases) page, `chmod +x` it, and run.
 
