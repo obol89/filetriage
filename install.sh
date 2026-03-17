@@ -50,7 +50,7 @@ chmod +x "$TMPFILE"
 # Check for existing install
 if [ -f "$INSTALL_PATH" ]; then
     printf "filetriage already exists at %s. Overwrite? [Y/n] " "$INSTALL_PATH"
-    read -r answer
+    read -r answer </dev/tty
     case "$answer" in
         [nN]*)
             echo "Aborted. Existing binary left unchanged."
@@ -64,14 +64,22 @@ fi
 echo "Installing to $INSTALL_PATH ..."
 
 if [ -w "$INSTALL_DIR" ]; then
-    cp "$TMPFILE" "$INSTALL_PATH"
+    install -m 755 "$TMPFILE" "$INSTALL_PATH"
 else
     echo "Note: $INSTALL_DIR is not writable by your user, using sudo."
-    if ! sudo cp "$TMPFILE" "$INSTALL_PATH"; then
-        echo "Error: sudo failed. You can manually copy the binary:"
-        echo "  sudo cp $TMPFILE $INSTALL_PATH"
+    if ! sudo install -m 755 "$TMPFILE" "$INSTALL_PATH"; then
+        echo "Error: sudo failed. You can manually install the binary:"
+        echo "  sudo install -m 755 $TMPFILE $INSTALL_PATH"
         exit 1
     fi
+fi
+
+# Verify installed binary size matches downloaded file
+if [ "$(stat -c%s "$TMPFILE" 2>/dev/null || stat -f%z "$TMPFILE")" != \
+     "$(stat -c%s "$INSTALL_PATH" 2>/dev/null || stat -f%z "$INSTALL_PATH")" ]; then
+    echo "Error: Size mismatch after install. The binary may be corrupted."
+    rm -f "$TMPFILE"
+    exit 1
 fi
 
 rm -f "$TMPFILE"
