@@ -28,36 +28,9 @@ def human_size(nbytes: int) -> str:
     return f"{nbytes:.1f} PB"
 
 
-def _detect_atime_disabled(roots: list[str]) -> bool:
-    """On Windows, sample files to check if atime tracking appears disabled."""
-    if sys.platform != "win32":
-        return False
-    matches = 0
-    checked = 0
-    for root in roots:
-        root_path = Path(root).resolve()
-        if not root_path.is_dir():
-            continue
-        try:
-            for entry in root_path.rglob("*"):
-                if not entry.is_file():
-                    continue
-                try:
-                    st = entry.stat()
-                    checked += 1
-                    if st.st_atime == st.st_mtime:
-                        matches += 1
-                    if checked >= 50:
-                        break
-                except OSError:
-                    continue
-        except OSError:
-            continue
-        if checked >= 50:
-            break
-    if checked == 0:
-        return False
-    return (matches / checked) > 0.9
+def _is_windows() -> bool:
+    """Return True on Windows, where atime is unreliable and mtime is used instead."""
+    return sys.platform == "win32"
 
 
 def _get_file_time(st: os.stat_result, use_mtime: bool) -> float:
@@ -898,7 +871,7 @@ class FileTriageApp(App):
         paths, min_age, dry_run = result
         self.dry_run = dry_run
 
-        self.use_mtime = _detect_atime_disabled(paths)
+        self.use_mtime = _is_windows()
 
         warnings: list[str] = []
         items = scan_paths(paths, min_age, warnings, self.use_mtime)

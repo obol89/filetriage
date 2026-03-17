@@ -73,15 +73,16 @@ jobs:
           name: filetriage-macos
           path: artifacts/macos
       - run: |
+          VERSION="${{ github.ref_name }}"
           tar xzf artifacts/linux/filetriage-linux.tar.gz -C artifacts/linux
-          mv artifacts/linux/filetriage artifacts/filetriage-linux
-          mv artifacts/windows/filetriage.exe artifacts/filetriage-windows.exe
+          mv artifacts/linux/filetriage "artifacts/filetriage-linux-${VERSION}"
+          mv artifacts/windows/filetriage.exe "artifacts/filetriage-windows-${VERSION}.exe"
           tar xzf artifacts/macos/filetriage-macos.tar.gz -C artifacts/macos
-          mv artifacts/macos/filetriage artifacts/filetriage-macos
+          mv artifacts/macos/filetriage "artifacts/filetriage-macos-${VERSION}"
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/filetriage-linux
-            artifacts/filetriage-windows.exe
-            artifacts/filetriage-macos
+            artifacts/filetriage-linux-${{ github.ref_name }}
+            artifacts/filetriage-windows-${{ github.ref_name }}.exe
+            artifacts/filetriage-macos-${{ github.ref_name }}
             install.sh

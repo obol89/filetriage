@@ -2,13 +2,13 @@
 set -euo pipefail
 
 REPO="obol89/filetriage"
-BASE_URL="https://github.com/${REPO}/releases/latest/download"
+API_URL="https://api.github.com/repos/${REPO}/releases/latest"
 
 # Detect OS
 OS="$(uname -s)"
 case "$OS" in
-    Linux)  ASSET="filetriage-linux" ;;
-    Darwin) ASSET="filetriage-macos" ;;
+    Linux)  PLATFORM="linux" ;;
+    Darwin) PLATFORM="macos" ;;
     *)
         echo "Error: Unsupported OS: $OS (only Linux and macOS are supported)"
         exit 1
@@ -26,12 +26,30 @@ case "$ARCH" in
         ;;
 esac
 
-DOWNLOAD_URL="${BASE_URL}/${ASSET}"
+# Resolve latest version tag
+echo "Fetching latest version ..."
+if command -v curl >/dev/null 2>&1; then
+    VERSION="$(curl -fsSL "$API_URL" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
+elif command -v wget >/dev/null 2>&1; then
+    VERSION="$(wget -qO- "$API_URL" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
+else
+    echo "Error: Neither curl nor wget found. Please install one and try again."
+    exit 1
+fi
+
+if [ -z "$VERSION" ]; then
+    echo "Error: Could not determine latest version from GitHub API."
+    exit 1
+fi
+
+ASSET="filetriage-${PLATFORM}-${VERSION}"
+DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VERSION}/${ASSET}"
 INSTALL_DIR="/usr/local/bin"
 INSTALL_PATH="${INSTALL_DIR}/filetriage"
 TMPFILE="$(mktemp)"
 
 echo "Detected: $OS ($ARCH)"
+echo "Latest version: $VERSION"
 echo "Downloading $ASSET ..."
 
 # Download using curl or wget
