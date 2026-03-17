@@ -3,7 +3,6 @@
 
 import argparse
 import os
-import platform
 import shutil
 import sys
 from datetime import datetime
@@ -11,10 +10,10 @@ from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.screen import Screen
-from textual.widgets import Header, Input, Label, Static, Switch
+from textual.widgets import Input, Static, Switch
 
 
 # ── Utility functions ────────────────────────────────────────────────────────
@@ -29,13 +28,9 @@ def human_size(nbytes: int) -> str:
     return f"{nbytes:.1f} PB"
 
 
-def _is_windows() -> bool:
-    return platform.system() == "Windows"
-
-
 def _detect_atime_disabled(roots: list[str]) -> bool:
     """On Windows, sample files to check if atime tracking appears disabled."""
-    if not _is_windows():
+    if sys.platform != "win32":
         return False
     matches = 0
     checked = 0
@@ -173,16 +168,15 @@ class DryRunBanner(Static):
     """Banner shown when dry-run mode is active."""
 
     def render(self) -> str:
-        return "DRY-RUN MODE — no files will be deleted"
+        return " *** DRY-RUN MODE — no files will be deleted *** "
 
     DEFAULT_CSS = """
     DryRunBanner {
-        background: $warning;
-        color: $text;
+        background: #e6a800;
+        color: #1a1a1a;
         text-align: center;
         text-style: bold;
         padding: 0 1;
-        dock: top;
         width: 100%;
     }
     """
@@ -204,7 +198,6 @@ class MtimeBanner(Static):
         text-align: center;
         text-style: bold;
         padding: 0 1;
-        dock: top;
         width: 100%;
     }
     """
@@ -218,64 +211,278 @@ class WarningPanel(Static):
         background: $error 20%;
         color: $warning;
         padding: 0 1;
-        margin: 0 1;
+        margin: 0 2;
         max-height: 6;
         overflow-y: auto;
     }
     """
 
 
-class ItemDisplay(Static):
-    """Displays details for the current item."""
+class HeaderBar(Static):
+    """Custom header bar with app name and progress."""
 
     DEFAULT_CSS = """
-    ItemDisplay {
-        padding: 1 2;
+    HeaderBar {
+        background: $boost;
+        color: $text;
+        padding: 0 2;
+        height: 1;
+        width: 100%;
+    }
+    """
+
+
+class ItemPath(Static):
+    """Displays the item path prominently."""
+
+    DEFAULT_CSS = """
+    ItemPath {
+        padding: 0 4;
+        margin: 1 2 0 2;
+        text-style: bold;
+        color: $text;
+    }
+    """
+
+
+class MetaRow(Static):
+    """A single label: value metadata row."""
+
+    DEFAULT_CSS = """
+    MetaRow {
+        padding: 0 4;
+        margin: 0 2;
+        height: 1;
+    }
+    """
+
+
+class ItemPanel(Vertical):
+    """Container for the current item display."""
+
+    DEFAULT_CSS = """
+    ItemPanel {
         margin: 1 2;
-        border: solid $accent;
+        padding: 1 0;
+        border: round $accent;
         height: auto;
     }
     """
 
 
-class ConfirmOverlay(Static):
-    """Confirmation overlay for non-empty directory deletion."""
+class ConfirmOverlay(Vertical):
+    """Confirmation overlay for directory deletion."""
 
     DEFAULT_CSS = """
     ConfirmOverlay {
-        background: $error 40%;
-        color: $text;
+        display: none;
+        align: center middle;
+        width: 100%;
+        height: 100%;
+        layer: overlay;
+    }
+    #confirm-box {
+        width: 64;
+        height: auto;
+        border: heavy $error;
+        background: $surface;
+        padding: 2 3;
+    }
+    .confirm-title {
         text-align: center;
         text-style: bold;
-        padding: 1 2;
-        margin: 1 2;
-        border: heavy $error;
-        display: none;
+        color: $error;
+        margin-bottom: 1;
+    }
+    .confirm-detail {
+        padding: 0 2;
+        margin-bottom: 0;
+        color: $text;
+    }
+    .confirm-hint {
+        text-align: center;
+        color: $text-muted;
+        margin-top: 1;
     }
     """
 
-    def render(self) -> str:
-        return (
-            "Delete this non-empty directory and ALL its contents?\n\n"
-            "[enter] confirm    [esc] cancel"
-        )
+
+class SuperConfirmOverlay(Vertical):
+    """Confirmation overlay for super-delete (parent directory)."""
+
+    DEFAULT_CSS = """
+    SuperConfirmOverlay {
+        display: none;
+        align: center middle;
+        width: 100%;
+        height: 100%;
+        layer: overlay;
+    }
+    #super-confirm-box {
+        width: 68;
+        height: auto;
+        border: heavy $error;
+        background: $surface;
+        padding: 2 3;
+    }
+    .confirm-title {
+        text-align: center;
+        text-style: bold;
+        color: $error;
+        margin-bottom: 1;
+    }
+    .confirm-detail {
+        padding: 0 2;
+        margin-bottom: 0;
+        color: $text;
+    }
+    .confirm-hint {
+        text-align: center;
+        color: $text-muted;
+        margin-top: 1;
+    }
+    """
 
 
-class KeyLegend(Static):
-    """Keyboard legend at the bottom."""
+class KeyButton(Static):
+    """A single keyboard shortcut displayed as a styled box."""
+
+    DEFAULT_CSS = """
+    KeyButton {
+        height: 1;
+        margin: 0 1;
+    }
+    .key-cap {
+        background: $accent;
+        color: $text;
+        text-style: bold;
+        padding: 0 1;
+    }
+    .key-label {
+        color: $text-muted;
+        padding: 0 0 0 1;
+    }
+    """
+
+
+class KeyLegend(Horizontal):
+    """Keyboard legend at the bottom with styled shortcut boxes."""
 
     DEFAULT_CSS = """
     KeyLegend {
         dock: bottom;
-        background: $surface;
-        color: $text-muted;
-        text-align: center;
+        background: $boost;
         padding: 0 1;
+        height: 1;
+        width: 100%;
+        align-horizontal: center;
+    }
+    .key-item {
+        width: auto;
+        height: 1;
+        margin: 0 1;
+    }
+    .key-cap {
+        background: $accent;
+        color: $text;
+        text-style: bold;
+        width: auto;
+        height: 1;
+        padding: 0 1;
+    }
+    .key-label {
+        color: $text-muted;
+        width: auto;
+        height: 1;
+        padding: 0 0 0 1;
     }
     """
 
-    def render(self) -> str:
-        return "[d] delete  [k] keep  [l] later  [q] quit"
+    def compose(self) -> ComposeResult:
+        shortcuts = [
+            ("d", "delete"),
+            ("D", "delete parent"),
+            ("k", "keep"),
+            ("l", "later"),
+            ("q", "quit"),
+        ]
+        for key, label in shortcuts:
+            with Horizontal(classes="key-item"):
+                yield Static(f" {key} ", classes="key-cap")
+                yield Static(label, classes="key-label")
+
+
+# ── Welcome Screen ───────────────────────────────────────────────────────────
+
+
+class WelcomeScreen(Screen):
+    """Welcome screen shown on app launch."""
+
+    DEFAULT_CSS = """
+    WelcomeScreen {
+        align: center middle;
+    }
+    #welcome-box {
+        width: 72;
+        height: auto;
+        border: heavy $accent;
+        padding: 2 4;
+        background: $surface;
+    }
+    #welcome-title {
+        text-align: center;
+        text-style: bold;
+        color: $accent;
+        margin-bottom: 1;
+    }
+    #welcome-desc {
+        text-align: center;
+        color: $text;
+        margin-bottom: 1;
+    }
+    .welcome-feature {
+        color: $text-muted;
+        padding: 0 2;
+    }
+    #welcome-hint {
+        text-align: center;
+        text-style: italic;
+        color: $text-muted;
+        margin-top: 2;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="welcome-box"):
+            yield Static("FileTriage", id="welcome-title")
+            yield Static(
+                "Review old files and directories one by one.\n"
+                "Decide to delete, keep, or defer each item.",
+                id="welcome-desc",
+            )
+            yield Static("")
+            yield Static(
+                "  Recursive scanning of multiple directories",
+                classes="welcome-feature",
+            )
+            yield Static(
+                "  Age-based filtering by last access time",
+                classes="welcome-feature",
+            )
+            yield Static(
+                "  Super delete to remove an entire parent directory",
+                classes="welcome-feature",
+            )
+            yield Static(
+                "  Dry-run mode to preview without deleting",
+                classes="welcome-feature",
+            )
+            yield Static(
+                "Press any key to continue", id="welcome-hint"
+            )
+
+    def on_key(self, event) -> None:
+        self.dismiss(True)
 
 
 # ── Startup Screen ───────────────────────────────────────────────────────────
@@ -366,7 +573,7 @@ class StartupScreen(Screen):
             with Vertical(id="dryrun-row"):
                 yield Switch(value=self.preset_dry_run, id="dryrun-switch")
             yield Static(
-                "Press [ctrl+s] to start scanning  |  [esc] to quit",
+                "Press \\[ctrl+s] to start scanning  |  \\[esc] to quit",
                 id="start-hint",
             )
 
@@ -387,10 +594,8 @@ class StartupScreen(Screen):
                 self._update_path_display()
                 event.input.value = ""
             else:
-                # Empty submit on path input — move focus to age input
                 self.query_one("#age-input", Input).focus()
         elif event.input.id == "age-input":
-            # Enter on age input — move focus to switch
             self.query_one("#dryrun-switch", Switch).focus()
 
     def on_key(self, event) -> None:
@@ -455,14 +660,21 @@ class SummaryScreen(Screen):
         kept: int,
         deferred: int,
         dry_run: bool,
+        freed_bytes: int = 0,
     ) -> None:
         super().__init__()
         self.deleted = deleted
         self.kept = kept
         self.deferred = deferred
         self.dry_run = dry_run
+        self.freed_bytes = freed_bytes
 
     def compose(self) -> ComposeResult:
+        freed_label = (
+            "Space that would be freed"
+            if self.dry_run
+            else "Space freed"
+        )
         with Vertical(id="summary-box"):
             yield Static("── FileTriage Summary ──", classes="summary-stat")
             if self.dry_run:
@@ -474,9 +686,13 @@ class SummaryScreen(Screen):
             yield Static(f"Deleted:  {self.deleted}", classes="summary-stat")
             yield Static(f"Kept:     {self.kept}", classes="summary-stat")
             yield Static(f"Deferred: {self.deferred}", classes="summary-stat")
+            yield Static(
+                f"{freed_label}: {human_size(self.freed_bytes)}",
+                classes="summary-stat",
+            )
             yield Static("")
             yield Static(
-                "Press [q] or [esc] to exit", classes="summary-stat"
+                "Press \\[q] or \\[esc] to exit", classes="summary-stat"
             )
 
     def action_quit_app(self) -> None:
@@ -490,28 +706,73 @@ class FileTriageApp(App):
     """Main FileTriage TUI application."""
 
     CSS = """
-    #progress {
-        text-align: center;
-        text-style: bold;
-        padding: 0 1;
-        background: $primary;
-        color: $text;
-        dock: top;
+    Screen {
+        layers: default overlay;
+    }
+    #banner-area {
+        height: auto;
         width: 100%;
+    }
+    #header-bar {
+        background: $boost;
+        color: $text;
+        padding: 0 2;
+        height: 1;
+        width: 100%;
+    }
+    #header-title {
+        width: 1fr;
+        text-style: bold;
+    }
+    #stats-bar {
+        height: 3;
+        width: 100%;
+        background: $surface;
+        border-bottom: solid $accent;
+    }
+    #stats-row {
+        height: 3;
+        align-horizontal: center;
+        padding: 0 2;
+    }
+    #stats-progress {
+        text-style: bold;
+        color: $text;
+        text-align: center;
+        padding: 1 4;
+        width: auto;
+    }
+    #stats-freed {
+        text-style: bold;
+        color: $success;
+        background: $boost;
+        text-align: center;
+        padding: 1 3;
+        margin: 0 0 0 4;
+        width: auto;
     }
     #main-area {
         height: 1fr;
     }
-    #scanning-msg {
-        text-align: center;
-        padding: 2;
-        text-style: italic;
+    .meta-label {
         color: $text-muted;
+        width: 20;
+    }
+    .meta-value {
+        color: $text;
+        text-style: bold;
+        width: 1fr;
+    }
+    .meta-row {
+        height: 1;
+        padding: 0 4;
+        margin: 0 2;
     }
     """
 
     BINDINGS = [
         Binding("d", "delete_item", "Delete", show=False),
+        Binding("D", "super_delete", "Super Delete", show=False),
         Binding("k", "keep_item", "Keep", show=False),
         Binding("l", "later_item", "Later", show=False),
         Binding("q", "quit_triage", "Quit", show=False),
@@ -520,6 +781,7 @@ class FileTriageApp(App):
     ]
 
     confirming = reactive(False)
+    super_confirming = reactive(False)
 
     def __init__(
         self,
@@ -543,20 +805,83 @@ class FileTriageApp(App):
         self.total_initial = 0
         self.processing_later = False
         self.triage_started = False
+        self._super_delete_dir: Path | None = None
+        self.freed_bytes: int = 0
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
-        yield Label("", id="progress")
+        with Vertical(id="banner-area"):
+            pass
+        with Horizontal(id="header-bar"):
+            yield Static("FileTriage", id="header-title")
+        with Horizontal(id="stats-bar"):
+            with Horizontal(id="stats-row"):
+                yield Static("", id="stats-progress")
+                yield Static("", id="stats-freed")
         with Vertical(id="main-area"):
-            yield ItemDisplay("")
+            yield ItemPanel()
             yield ConfirmOverlay()
+            yield SuperConfirmOverlay()
         yield KeyLegend()
+
+    def _compose_confirm_overlay(self) -> ComposeResult:
+        with Vertical(id="confirm-box"):
+            yield Static(
+                "Delete non-empty directory?", classes="confirm-title"
+            )
+            yield Static("", id="confirm-path", classes="confirm-detail")
+            yield Static("", id="confirm-info", classes="confirm-detail")
+            yield Static(
+                "\\[enter] confirm    \\[esc] cancel", classes="confirm-hint"
+            )
+        return []
+
+    def _compose_super_confirm_overlay(self) -> ComposeResult:
+        with Vertical(id="super-confirm-box"):
+            yield Static(
+                "Delete PARENT directory?", classes="confirm-title"
+            )
+            yield Static("", id="super-confirm-path", classes="confirm-detail")
+            yield Static("", id="super-confirm-info", classes="confirm-detail")
+            yield Static(
+                "\\[enter] confirm    \\[esc] cancel", classes="confirm-hint"
+            )
+        return []
 
     def on_mount(self) -> None:
         self.title = "FileTriage"
-        self.query_one("#progress", Label).styles.display = "none"
-        self.query_one(ItemDisplay).styles.display = "none"
+        # Build confirm overlay contents
+        confirm = self.query_one(ConfirmOverlay)
+        confirm.mount(
+            Vertical(
+                Static("Delete non-empty directory?", classes="confirm-title"),
+                Static("", id="confirm-path", classes="confirm-detail"),
+                Static("", id="confirm-info", classes="confirm-detail"),
+                Static(
+                    "\\[enter] confirm    \\[esc] cancel", classes="confirm-hint"
+                ),
+                id="confirm-box",
+            )
+        )
+        super_confirm = self.query_one(SuperConfirmOverlay)
+        super_confirm.mount(
+            Vertical(
+                Static("Delete PARENT directory?", classes="confirm-title"),
+                Static("", id="super-confirm-path", classes="confirm-detail"),
+                Static("", id="super-confirm-info", classes="confirm-detail"),
+                Static(
+                    "\\[enter] confirm    \\[esc] cancel", classes="confirm-hint"
+                ),
+                id="super-confirm-box",
+            )
+        )
+        # Hide triage UI until startup completes
+        self.query_one("#header-bar").styles.display = "none"
+        self.query_one("#stats-bar").styles.display = "none"
+        self.query_one("#main-area").styles.display = "none"
         self.query_one(KeyLegend).styles.display = "none"
+        self.push_screen(WelcomeScreen(), callback=self._on_welcome_done)
+
+    def _on_welcome_done(self, result) -> None:
         self.push_screen(
             StartupScreen(
                 preset_paths=self.preset_paths,
@@ -573,7 +898,6 @@ class FileTriageApp(App):
         paths, min_age, dry_run = result
         self.dry_run = dry_run
 
-        # Detect atime disabled on Windows
         self.use_mtime = _detect_atime_disabled(paths)
 
         warnings: list[str] = []
@@ -582,32 +906,29 @@ class FileTriageApp(App):
         self.queue = items
         self.total_initial = len(items)
 
-        # Now build the triage UI
         self.triage_started = True
         self._build_triage_ui()
 
     def _build_triage_ui(self) -> None:
         """Populate the main screen for triage after scanning."""
-        main_area = self.query_one("#main-area", Vertical)
-
-        # Mount banners at the top of the app (before progress)
+        banner_area = self.query_one("#banner-area", Vertical)
         if self.dry_run:
-            self.mount(DryRunBanner(), before=self.query_one("#progress"))
+            banner_area.mount(DryRunBanner())
         if self.use_mtime:
-            self.mount(MtimeBanner(), before=self.query_one("#progress"))
+            banner_area.mount(MtimeBanner())
 
-        # Mount warnings inside main area, before ItemDisplay
+        main_area = self.query_one("#main-area", Vertical)
         if self.scan_warnings:
             main_area.mount(
                 WarningPanel(
                     "\n".join(f"! {w}" for w in self.scan_warnings)
                 ),
-                before=self.query_one(ItemDisplay),
+                before=self.query_one(ItemPanel),
             )
 
-        # Show progress bar and triage elements
-        self.query_one("#progress", Label).styles.display = "block"
-        self.query_one(ItemDisplay).styles.display = "block"
+        self.query_one("#header-bar").styles.display = "block"
+        self.query_one("#stats-bar").styles.display = "block"
+        self.query_one("#main-area").styles.display = "block"
         self.query_one(KeyLegend).styles.display = "block"
 
         if self.queue:
@@ -630,7 +951,7 @@ class FileTriageApp(App):
         q = self.active_queue
         total = len(q)
         num = min(self.current_index + 1, total)
-        phase = " (deferred items)" if self.processing_later else ""
+        phase = " (deferred)" if self.processing_later else ""
         return f"Item {num} of {total}{phase}"
 
     def _show_current(self) -> None:
@@ -644,34 +965,62 @@ class FileTriageApp(App):
             self._show_summary()
             return
 
-        self.query_one("#progress", Label).update(self._progress_text())
-
-        time_label = "Last modified" if self.use_mtime else "Last accessed"
-        lines: list[str] = []
-        path = item["path"]
-        lines.append(f"Path: {path}")
-
-        if item["type"] == "file":
-            lines.append("Type: file")
-            lines.append(f"Extension: {item.get('extension', '(none)')}")
-        else:
-            if item.get("empty"):
-                lines.append("Type: directory (empty)")
-            else:
-                lines.append(
-                    f"Type: directory (non-empty — {item['item_count']} items)"
-                )
-
-        lines.append(f"Size: {human_size(item['size'])}")
-        atime_dt = datetime.fromtimestamp(item["atime"])
-        age_days = (datetime.now() - atime_dt).days
-        lines.append(
-            f"{time_label}: {atime_dt:%Y-%m-%d %H:%M}  ({age_days} days ago)"
+        self.query_one("#stats-progress", Static).update(
+            self._progress_text()
         )
 
-        self.query_one(ItemDisplay).update("\n".join(lines))
+        time_label = "Last modified" if self.use_mtime else "Last accessed"
+        panel = self.query_one(ItemPanel)
+        panel.remove_children()
+
+        path = item["path"]
+        panel.mount(ItemPath(str(path)))
+
+        if item["type"] == "file":
+            type_text = "file"
+            ext_text = item.get("extension", "(none)")
+        else:
+            if item.get("empty"):
+                type_text = "directory (empty)"
+            else:
+                type_text = (
+                    f"directory (non-empty — {item['item_count']} items)"
+                )
+            ext_text = None
+
+        atime_dt = datetime.fromtimestamp(item["atime"])
+        age_days = (datetime.now() - atime_dt).days
+
+        rows = [
+            ("Type", type_text),
+        ]
+        if ext_text is not None:
+            rows.append(("Extension", ext_text))
+        rows.append(("Size", human_size(item["size"])))
+        rows.append(
+            (time_label, f"{atime_dt:%Y-%m-%d %H:%M}  ({age_days} days ago)")
+        )
+
+        for label, value in rows:
+            panel.mount(
+                Horizontal(
+                    Static(f"{label}:", classes="meta-label"),
+                    Static(str(value), classes="meta-value"),
+                    classes="meta-row",
+                )
+            )
+
         self.query_one(ConfirmOverlay).styles.display = "none"
+        self.query_one(SuperConfirmOverlay).styles.display = "none"
         self.confirming = False
+        self.super_confirming = False
+        self._super_delete_dir = None
+
+    def _update_freed_display(self) -> None:
+        label = "Would free" if self.dry_run else "Freed"
+        self.query_one("#stats-freed", Static).update(
+            f"{label}: {human_size(self.freed_bytes)}"
+        )
 
     def _advance(self) -> None:
         self.current_index += 1
@@ -680,8 +1029,11 @@ class FileTriageApp(App):
     def _do_delete(self, item: dict) -> None:
         """Perform the actual deletion (or simulate in dry-run)."""
         path: Path = item["path"]
+        item_size = item.get("size", 0)
         if self.dry_run:
             self.deleted += 1
+            self.freed_bytes += item_size
+            self._update_freed_display()
             return
         try:
             if item["type"] == "file":
@@ -691,8 +1043,88 @@ class FileTriageApp(App):
             else:
                 shutil.rmtree(path)
             self.deleted += 1
+            self.freed_bytes += item_size
+            self._update_freed_display()
         except OSError as e:
             self.notify(f"Delete failed: {e}", severity="error", timeout=4)
+
+    def _do_super_delete(self, parent: Path) -> None:
+        """Delete a parent directory and purge its children from queues."""
+        # Compute total size before deletion
+        _, parent_total_size, _ = dir_stats(parent, self.use_mtime)
+        if not self.dry_run:
+            try:
+                shutil.rmtree(parent)
+            except OSError as e:
+                self.notify(
+                    f"Delete failed: {e}", severity="error", timeout=4
+                )
+                return
+
+        self.freed_bytes += parent_total_size
+
+        # Count and remove all queued items inside this parent
+        removed_main = 0
+        new_queue = []
+        for i, it in enumerate(self.queue):
+            try:
+                it["path"].relative_to(parent)
+                # Item is inside the deleted parent
+                if i == self.current_index and not self.processing_later:
+                    removed_main += 1
+                elif i > self.current_index or self.processing_later:
+                    removed_main += 1
+                else:
+                    new_queue.append(it)
+            except ValueError:
+                new_queue.append(it)
+
+        removed_later = 0
+        new_later = []
+        for it in self.later_queue:
+            try:
+                it["path"].relative_to(parent)
+                removed_later += 1
+            except ValueError:
+                new_later.append(it)
+
+        # The parent itself counts as one deletion
+        self.deleted += 1
+        # Items that were already queued and got wiped are counted as deleted
+        self.deleted += removed_main + removed_later
+        # Adjust deferred count for removed later items
+        if removed_later > 0 and not self.processing_later:
+            self.deferred = max(0, self.deferred - removed_later)
+
+        if self.processing_later:
+            # Rebuild later queue, adjust index
+            idx_before = sum(
+                1
+                for it in self.later_queue[: self.current_index]
+                if not self._path_is_under(it["path"], parent)
+            )
+            self.later_queue = new_later
+            self.queue = new_queue
+            self.current_index = idx_before
+        else:
+            idx_before = sum(
+                1
+                for it in self.queue[: self.current_index]
+                if not self._path_is_under(it["path"], parent)
+            )
+            self.queue = new_queue
+            self.later_queue = new_later
+            self.current_index = idx_before
+
+        self._update_freed_display()
+
+    @staticmethod
+    def _path_is_under(child: Path, parent: Path) -> bool:
+        try:
+            child.relative_to(parent)
+            return True
+        except ValueError:
+            return False
 
     def _show_summary(self) -> None:
         self.push_screen(
@@ -701,25 +1133,59 @@ class FileTriageApp(App):
                 kept=self.kept,
                 deferred=self.deferred,
                 dry_run=self.dry_run,
+                freed_bytes=self.freed_bytes,
             )
         )
 
     # ── Actions ──────────────────────────────────────────────────────────
 
     def action_delete_item(self) -> None:
-        if not self.triage_started or self.confirming:
+        if not self.triage_started or self.confirming or self.super_confirming:
             return
         item = self.current_item
         if item is None:
             return
         if item["type"] == "directory" and not item.get("empty"):
+            self.query_one("#confirm-path", Static).update(
+                f"Path: {item['path']}"
+            )
+            self.query_one("#confirm-info", Static).update(
+                f"{item['item_count']} items, {human_size(item['size'])}"
+            )
             self.query_one(ConfirmOverlay).styles.display = "block"
             self.confirming = True
             return
         self._do_delete(item)
         self._advance()
 
+    def action_super_delete(self) -> None:
+        if not self.triage_started or self.confirming or self.super_confirming:
+            return
+        item = self.current_item
+        if item is None:
+            return
+        parent = item["path"].parent
+        # Gather parent dir stats
+        count, total, _ = dir_stats(parent, self.use_mtime)
+        self._super_delete_dir = parent
+        self.query_one("#super-confirm-path", Static).update(
+            f"Path: {parent}"
+        )
+        self.query_one("#super-confirm-info", Static).update(
+            f"{count} items, {human_size(total)}"
+        )
+        self.query_one(SuperConfirmOverlay).styles.display = "block"
+        self.super_confirming = True
+
     def action_confirm_delete(self) -> None:
+        if self.super_confirming:
+            parent = self._super_delete_dir
+            self.super_confirming = False
+            self.query_one(SuperConfirmOverlay).styles.display = "none"
+            if parent is not None:
+                self._do_super_delete(parent)
+            self._show_current()
+            return
         if not self.confirming:
             return
         item = self.current_item
@@ -730,13 +1196,18 @@ class FileTriageApp(App):
         self._advance()
 
     def action_cancel_delete(self) -> None:
+        if self.super_confirming:
+            self.query_one(SuperConfirmOverlay).styles.display = "none"
+            self.super_confirming = False
+            self._super_delete_dir = None
+            return
         if not self.confirming:
             return
         self.query_one(ConfirmOverlay).styles.display = "none"
         self.confirming = False
 
     def action_keep_item(self) -> None:
-        if not self.triage_started or self.confirming:
+        if not self.triage_started or self.confirming or self.super_confirming:
             return
         if self.current_item is None:
             return
@@ -744,7 +1215,7 @@ class FileTriageApp(App):
         self._advance()
 
     def action_later_item(self) -> None:
-        if not self.triage_started or self.confirming:
+        if not self.triage_started or self.confirming or self.super_confirming:
             return
         item = self.current_item
         if item is None:
@@ -762,7 +1233,7 @@ class FileTriageApp(App):
         if not self.triage_started:
             self.exit()
             return
-        if self.confirming:
+        if self.confirming or self.super_confirming:
             return
         q = self.active_queue
         remaining = len(q) - self.current_index
