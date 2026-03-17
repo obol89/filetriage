@@ -3,18 +3,21 @@
 
 import argparse
 import os
+import platform
 import shutil
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
-from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Vertical
 from textual.reactive import reactive
 from textual.screen import Screen
-from textual.widgets import Footer, Header, Label, Static
+from textual.widgets import Header, Input, Label, Static, Switch
+
+
+# ── Utility functions ────────────────────────────────────────────────────────
 
 
 def human_size(nbytes: int) -> str:
@@ -26,16 +29,58 @@ def human_size(nbytes: int) -> str:
     return f"{nbytes:.1f} PB"
 
 
-def get_atime(path: Path) -> float:
-    """Get access time of a path, returning 0 on error."""
+def _is_windows() -> bool:
+    return platform.system() == "Windows"
+
+
+def _detect_atime_disabled(roots: list[str]) -> bool:
+    """On Windows, sample files to check if atime tracking appears disabled."""
+    if not _is_windows():
+        return False
+    matches = 0
+    checked = 0
+    for root in roots:
+        root_path = Path(root).resolve()
+        if not root_path.is_dir():
+            continue
+        try:
+            for entry in root_path.rglob("*"):
+                if not entry.is_file():
+                    continue
+                try:
+                    st = entry.stat()
+                    checked += 1
+                    if st.st_atime == st.st_mtime:
+                        matches += 1
+                    if checked >= 50:
+                        break
+                except OSError:
+                    continue
+        except OSError:
+            continue
+        if checked >= 50:
+            break
+    if checked == 0:
+        return False
+    return (matches / checked) > 0.9
+
+
+def _get_file_time(st: os.stat_result, use_mtime: bool) -> float:
+    """Get the relevant timestamp from a stat result."""
+    return st.st_mtime if use_mtime else st.st_atime
+
+
+def get_atime(path: Path, use_mtime: bool = False) -> float:
+    """Get access time (or mtime fallback) of a path, returning 0 on error."""
     try:
-        return path.stat().st_atime
+        st = path.stat()
+        return _get_file_time(st, use_mtime)
     except OSError:
         return 0.0
 
 
-def dir_stats(path: Path) -> tuple[int, int, float]:
-    """Return (item_count, total_size, oldest_atime) for a directory's contents."""
+def dir_stats(path: Path, use_mtime: bool = False) -> tuple[int, int, float]:
+    """Return (item_count, total_size, oldest_time) for a directory's contents."""
     count = 0
     total = 0
     oldest = float("inf")
@@ -46,20 +91,23 @@ def dir_stats(path: Path) -> tuple[int, int, float]:
                 count += 1
                 if entry.is_file():
                     total += st.st_size
-                atime = st.st_atime
-                if atime < oldest:
-                    oldest = atime
+                t = _get_file_time(st, use_mtime)
+                if t < oldest:
+                    oldest = t
             except OSError:
                 continue
     except OSError:
         pass
     if oldest == float("inf"):
-        oldest = get_atime(path)
+        oldest = get_atime(path, use_mtime)
     return count, total, oldest
 
 
 def scan_paths(
-    roots: list[str], min_age_days: int, warnings: list[str]
+    roots: list[str],
+    min_age_days: int,
+    warnings: list[str],
+    use_mtime: bool = False,
 ) -> list[dict]:
     """Scan directories and collect items older than min_age days."""
     cutoff = datetime.now().timestamp() - (min_age_days * 86400)
@@ -80,18 +128,19 @@ def scan_paths(
                 try:
                     if entry.is_file():
                         st = entry.stat()
-                        if st.st_atime < cutoff:
+                        t = _get_file_time(st, use_mtime)
+                        if t < cutoff:
                             files.append(
                                 {
                                     "path": entry,
                                     "type": "file",
                                     "size": st.st_size,
-                                    "atime": st.st_atime,
+                                    "atime": t,
                                     "extension": entry.suffix or "(none)",
                                 }
                             )
                     elif entry.is_dir():
-                        count, total, oldest = dir_stats(entry)
+                        count, total, oldest = dir_stats(entry, use_mtime)
                         if oldest < cutoff:
                             dirs.append(
                                 {
@@ -112,7 +161,6 @@ def scan_paths(
         except OSError as e:
             warnings.append(f"Error scanning {root_path}: {e}")
 
-    # Sort files oldest-first, then append dirs (also oldest-first)
     files.sort(key=lambda x: x["atime"])
     dirs.sort(key=lambda x: x["atime"])
     return files + dirs
@@ -125,11 +173,33 @@ class DryRunBanner(Static):
     """Banner shown when dry-run mode is active."""
 
     def render(self) -> str:
-        return "⚠  DRY-RUN MODE — no files will be deleted  ⚠"
+        return "DRY-RUN MODE — no files will be deleted"
 
     DEFAULT_CSS = """
     DryRunBanner {
         background: $warning;
+        color: $text;
+        text-align: center;
+        text-style: bold;
+        padding: 0 1;
+        dock: top;
+        width: 100%;
+    }
+    """
+
+
+class MtimeBanner(Static):
+    """Banner shown when falling back to mtime on Windows."""
+
+    def render(self) -> str:
+        return (
+            "atime tracking appears disabled — "
+            "using modification time (mtime) instead"
+        )
+
+    DEFAULT_CSS = """
+    MtimeBanner {
+        background: $primary;
         color: $text;
         text-align: center;
         text-style: bold;
@@ -208,13 +278,156 @@ class KeyLegend(Static):
         return "[d] delete  [k] keep  [l] later  [q] quit"
 
 
+# ── Startup Screen ───────────────────────────────────────────────────────────
+
+
+class StartupScreen(Screen):
+    """Interactive config screen shown before scanning."""
+
+    BINDINGS = [
+        Binding("escape", "quit_app", "Quit", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    StartupScreen {
+        align: center middle;
+    }
+    #startup-box {
+        width: 80;
+        height: auto;
+        border: heavy $accent;
+        padding: 2 4;
+        background: $surface;
+    }
+    #startup-box Static {
+        margin-bottom: 0;
+    }
+    .section-label {
+        text-style: bold;
+        margin-top: 1;
+    }
+    #path-list {
+        margin: 0 2;
+        height: auto;
+        max-height: 8;
+        color: $success;
+    }
+    #path-input {
+        margin: 0 0 1 0;
+    }
+    #age-input {
+        margin: 0 0 1 0;
+        width: 20;
+    }
+    #dryrun-row {
+        height: 3;
+        margin: 0 0 1 0;
+    }
+    #dryrun-row Static {
+        width: auto;
+        margin-right: 2;
+    }
+    #start-hint {
+        text-align: center;
+        text-style: italic;
+        color: $text-muted;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(
+        self,
+        preset_paths: list[str] | None = None,
+        preset_min_age: int = 30,
+        preset_dry_run: bool = False,
+    ) -> None:
+        super().__init__()
+        self.paths: list[str] = list(preset_paths) if preset_paths else []
+        self.preset_min_age = preset_min_age
+        self.preset_dry_run = preset_dry_run
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="startup-box"):
+            yield Static("── FileTriage Setup ──")
+            yield Static("")
+            yield Static("Directories to scan:", classes="section-label")
+            yield Static(self._path_list_text(), id="path-list")
+            yield Input(
+                placeholder="Enter directory path, then press Enter (empty to finish)",
+                id="path-input",
+            )
+            yield Static("Minimum file age (days):", classes="section-label")
+            yield Input(
+                value=str(self.preset_min_age),
+                id="age-input",
+                type="integer",
+            )
+            yield Static("Dry-run mode:", classes="section-label")
+            with Vertical(id="dryrun-row"):
+                yield Switch(value=self.preset_dry_run, id="dryrun-switch")
+            yield Static(
+                "Press [ctrl+s] to start scanning  |  [esc] to quit",
+                id="start-hint",
+            )
+
+    def _path_list_text(self) -> str:
+        if not self.paths:
+            return "(none added yet)"
+        return "\n".join(f"  {p}" for p in self.paths)
+
+    def _update_path_display(self) -> None:
+        self.query_one("#path-list", Static).update(self._path_list_text())
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "path-input":
+            val = event.value.strip()
+            if val:
+                resolved = str(Path(val).resolve())
+                self.paths.append(resolved)
+                self._update_path_display()
+                event.input.value = ""
+            else:
+                # Empty submit on path input — move focus to age input
+                self.query_one("#age-input", Input).focus()
+        elif event.input.id == "age-input":
+            # Enter on age input — move focus to switch
+            self.query_one("#dryrun-switch", Switch).focus()
+
+    def on_key(self, event) -> None:
+        if event.key == "ctrl+s":
+            self._start_scan()
+
+    def _start_scan(self) -> None:
+        if not self.paths:
+            self.notify("Add at least one directory to scan.", severity="warning")
+            return
+
+        age_input = self.query_one("#age-input", Input)
+        try:
+            min_age = int(age_input.value)
+            if min_age < 0:
+                raise ValueError
+        except ValueError:
+            self.notify("Min age must be a positive integer.", severity="error")
+            return
+
+        dry_run = self.query_one("#dryrun-switch", Switch).value
+        self.dismiss((self.paths, min_age, dry_run))
+
+    def action_quit_app(self) -> None:
+        self.app.exit()
+
+
 # ── Summary Screen ───────────────────────────────────────────────────────────
 
 
 class SummaryScreen(Screen):
     """Final summary screen shown after all items are processed or on quit."""
 
-    BINDINGS = [Binding("q", "quit_app", "Quit"), Binding("escape", "quit_app", "Quit")]
+    BINDINGS = [
+        Binding("q", "quit_app", "Quit"),
+        Binding("escape", "quit_app", "Quit"),
+    ]
 
     DEFAULT_CSS = """
     SummaryScreen {
@@ -254,18 +467,13 @@ class SummaryScreen(Screen):
             yield Static("── FileTriage Summary ──", classes="summary-stat")
             if self.dry_run:
                 yield Static(
-                    "(DRY-RUN — nothing was actually deleted)", classes="summary-stat"
+                    "(DRY-RUN — nothing was actually deleted)",
+                    classes="summary-stat",
                 )
             yield Static("")
-            yield Static(
-                f"Deleted:  {self.deleted}", classes="summary-stat"
-            )
-            yield Static(
-                f"Kept:     {self.kept}", classes="summary-stat"
-            )
-            yield Static(
-                f"Deferred: {self.deferred}", classes="summary-stat"
-            )
+            yield Static(f"Deleted:  {self.deleted}", classes="summary-stat")
+            yield Static(f"Kept:     {self.kept}", classes="summary-stat")
+            yield Static(f"Deferred: {self.deferred}", classes="summary-stat")
             yield Static("")
             yield Static(
                 "Press [q] or [esc] to exit", classes="summary-stat"
@@ -294,7 +502,7 @@ class FileTriageApp(App):
     #main-area {
         height: 1fr;
     }
-    #empty-msg {
+    #scanning-msg {
         text-align: center;
         padding: 2;
         text-style: italic;
@@ -315,36 +523,93 @@ class FileTriageApp(App):
 
     def __init__(
         self,
-        items: list[dict],
-        dry_run: bool,
-        warnings: list[str],
+        preset_paths: list[str] | None = None,
+        preset_min_age: int = 30,
+        preset_dry_run: bool = False,
     ) -> None:
         super().__init__()
-        self.queue: list[dict] = list(items)
+        self.preset_paths = preset_paths or []
+        self.preset_min_age = preset_min_age
+        self.preset_dry_run = preset_dry_run
+        self.queue: list[dict] = []
         self.later_queue: list[dict] = []
-        self.dry_run = dry_run
-        self.warnings = warnings
+        self.dry_run = preset_dry_run
+        self.scan_warnings: list[str] = []
+        self.use_mtime = False
         self.current_index = 0
         self.deleted = 0
         self.kept = 0
         self.deferred = 0
-        self.total_initial = len(items)
+        self.total_initial = 0
         self.processing_later = False
+        self.triage_started = False
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        if self.dry_run:
-            yield DryRunBanner()
         yield Label("", id="progress")
         with Vertical(id="main-area"):
-            if self.warnings:
-                yield WarningPanel("\n".join(f"⚠ {w}" for w in self.warnings))
             yield ItemDisplay("")
             yield ConfirmOverlay()
         yield KeyLegend()
 
     def on_mount(self) -> None:
         self.title = "FileTriage"
+        self.query_one("#progress", Label).styles.display = "none"
+        self.query_one(ItemDisplay).styles.display = "none"
+        self.query_one(KeyLegend).styles.display = "none"
+        self.push_screen(
+            StartupScreen(
+                preset_paths=self.preset_paths,
+                preset_min_age=self.preset_min_age,
+                preset_dry_run=self.preset_dry_run,
+            ),
+            callback=self._on_startup_done,
+        )
+
+    def _on_startup_done(self, result) -> None:
+        if result is None:
+            self.exit()
+            return
+        paths, min_age, dry_run = result
+        self.dry_run = dry_run
+
+        # Detect atime disabled on Windows
+        self.use_mtime = _detect_atime_disabled(paths)
+
+        warnings: list[str] = []
+        items = scan_paths(paths, min_age, warnings, self.use_mtime)
+        self.scan_warnings = warnings
+        self.queue = items
+        self.total_initial = len(items)
+
+        # Now build the triage UI
+        self.triage_started = True
+        self._build_triage_ui()
+
+    def _build_triage_ui(self) -> None:
+        """Populate the main screen for triage after scanning."""
+        main_area = self.query_one("#main-area", Vertical)
+
+        # Mount banners at the top of the app (before progress)
+        if self.dry_run:
+            self.mount(DryRunBanner(), before=self.query_one("#progress"))
+        if self.use_mtime:
+            self.mount(MtimeBanner(), before=self.query_one("#progress"))
+
+        # Mount warnings inside main area, before ItemDisplay
+        if self.scan_warnings:
+            main_area.mount(
+                WarningPanel(
+                    "\n".join(f"! {w}" for w in self.scan_warnings)
+                ),
+                before=self.query_one(ItemDisplay),
+            )
+
+        # Show progress bar and triage elements
+        self.query_one("#progress", Label).styles.display = "block"
+        self.query_one(ItemDisplay).styles.display = "block"
+        self.query_one(KeyLegend).styles.display = "block"
+
         if self.queue:
             self._show_current()
         else:
@@ -381,12 +646,13 @@ class FileTriageApp(App):
 
         self.query_one("#progress", Label).update(self._progress_text())
 
+        time_label = "Last modified" if self.use_mtime else "Last accessed"
         lines: list[str] = []
         path = item["path"]
         lines.append(f"Path: {path}")
 
         if item["type"] == "file":
-            lines.append(f"Type: file")
+            lines.append("Type: file")
             lines.append(f"Extension: {item.get('extension', '(none)')}")
         else:
             if item.get("empty"):
@@ -399,7 +665,9 @@ class FileTriageApp(App):
         lines.append(f"Size: {human_size(item['size'])}")
         atime_dt = datetime.fromtimestamp(item["atime"])
         age_days = (datetime.now() - atime_dt).days
-        lines.append(f"Last accessed: {atime_dt:%Y-%m-%d %H:%M}  ({age_days} days ago)")
+        lines.append(
+            f"{time_label}: {atime_dt:%Y-%m-%d %H:%M}  ({age_days} days ago)"
+        )
 
         self.query_one(ItemDisplay).update("\n".join(lines))
         self.query_one(ConfirmOverlay).styles.display = "none"
@@ -419,7 +687,7 @@ class FileTriageApp(App):
             if item["type"] == "file":
                 path.unlink()
             elif item.get("empty"):
-                os.rmdir(path)
+                path.rmdir()
             else:
                 shutil.rmtree(path)
             self.deleted += 1
@@ -439,12 +707,11 @@ class FileTriageApp(App):
     # ── Actions ──────────────────────────────────────────────────────────
 
     def action_delete_item(self) -> None:
-        if self.confirming:
+        if not self.triage_started or self.confirming:
             return
         item = self.current_item
         if item is None:
             return
-        # Non-empty directory requires confirmation
         if item["type"] == "directory" and not item.get("empty"):
             self.query_one(ConfirmOverlay).styles.display = "block"
             self.confirming = True
@@ -469,7 +736,7 @@ class FileTriageApp(App):
         self.confirming = False
 
     def action_keep_item(self) -> None:
-        if self.confirming:
+        if not self.triage_started or self.confirming:
             return
         if self.current_item is None:
             return
@@ -477,7 +744,7 @@ class FileTriageApp(App):
         self._advance()
 
     def action_later_item(self) -> None:
-        if self.confirming:
+        if not self.triage_started or self.confirming:
             return
         item = self.current_item
         if item is None:
@@ -485,18 +752,18 @@ class FileTriageApp(App):
         if not self.processing_later:
             self.later_queue.append(item)
         else:
-            # Already in later queue — move to end
             self.later_queue.append(self.later_queue.pop(self.current_index))
-            # Don't increment index since we popped current
             self._show_current()
             return
         self.deferred += 1
         self._advance()
 
     def action_quit_triage(self) -> None:
+        if not self.triage_started:
+            self.exit()
+            return
         if self.confirming:
             return
-        # Count remaining items as deferred
         q = self.active_queue
         remaining = len(q) - self.current_index
         if self.processing_later:
@@ -516,33 +783,29 @@ def main() -> None:
     )
     parser.add_argument(
         "paths",
-        nargs="+",
-        help="Directories to scan",
+        nargs="*",
+        default=[],
+        help="Directories to scan (pre-fills startup screen)",
     )
     parser.add_argument(
         "--min-age",
         type=int,
         default=30,
-        help="Minimum age in days based on last accessed date (default: 30)",
+        help="Minimum age in days (default: 30, pre-fills startup screen)",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Simulate deletions without removing files",
+        help="Pre-enable dry-run mode on startup screen",
     )
 
     args = parser.parse_args()
 
-    warnings: list[str] = []
-    print(f"Scanning {len(args.paths)} path(s) for items older than {args.min_age} days...")
-    items = scan_paths(args.paths, args.min_age, warnings)
-    print(f"Found {len(items)} items to review.")
-
-    if not items and not warnings:
-        print("Nothing to review. All files are newer than the threshold.")
-        sys.exit(0)
-
-    app = FileTriageApp(items=items, dry_run=args.dry_run, warnings=warnings)
+    app = FileTriageApp(
+        preset_paths=args.paths,
+        preset_min_age=args.min_age,
+        preset_dry_run=args.dry_run,
+    )
     app.run()
 
 
