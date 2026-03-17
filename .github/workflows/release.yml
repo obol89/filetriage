@@ -18,6 +18,7 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements.txt
       - run: python build.py
+      - run: chmod +x dist/filetriage
       - uses: actions/upload-artifact@v4
         with:
           name: filetriage-linux
@@ -46,6 +47,7 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements.txt
       - run: python build.py
+      - run: chmod +x dist/filetriage
       - uses: actions/upload-artifact@v4
         with:
           name: filetriage-macos
