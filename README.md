@@ -17,6 +17,18 @@ Interactive TUI for reviewing and deleting old files and directories on Linux, W
 - Graceful handling of permission errors on all platforms
 - Builds to a single portable binary via PyInstaller
 
+## Screenshots
+
+![Welcome screen shown on first launch](screenshots/welcome.png)
+
+![Interactive setup screen for configuring scan paths, age threshold, and dry-run mode](screenshots/setup.png)
+
+![Main triage view showing file metadata and keyboard shortcuts](screenshots/triage.png)
+
+![Real-time freed space counter updates as files are deleted](screenshots/freed.png)
+
+![Summary screen shown after completing the review](screenshots/summary.png)
+
 ## Quick install (Linux / macOS)
 
 ```sh
