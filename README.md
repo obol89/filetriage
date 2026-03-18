@@ -105,13 +105,14 @@ GitHub Actions automatically builds binaries for Linux, Windows, and macOS on ea
 
 ## Keyboard shortcuts
 
-| Key | Action                                    |
-|-----|-------------------------------------------|
-| `d` | Delete the current item                   |
-| `D` | Super delete — remove the parent directory |
-| `k` | Keep the current item                     |
-| `l` | Defer to later (re-queue to the end)      |
-| `q` | Quit and show summary                     |
+| Key | Action                                                  |
+|-----|---------------------------------------------------------|
+| `d` | Delete the current item                                 |
+| `D` | Super delete - remove the parent directory               |
+| `k` | Keep the current item                                   |
+| `l` | Defer to later (re-queue to the end)                    |
+| `o` | Open the file or directory with the default application |
+| `q` | Quit and show summary                                   |
 
 When deleting a non-empty directory, press `Enter` to confirm or `Esc` to cancel.
 

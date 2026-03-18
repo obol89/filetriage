@@ -4,6 +4,7 @@
 import argparse
 import os
 import shutil
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -377,6 +378,7 @@ class KeyLegend(Horizontal):
             ("D", "delete parent"),
             ("k", "keep"),
             ("l", "later"),
+            ("o", "open"),
             ("q", "quit"),
         ]
         for key, label in shortcuts:
@@ -748,6 +750,7 @@ class FileTriageApp(App):
         Binding("D", "super_delete", "Super Delete", show=False),
         Binding("k", "keep_item", "Keep", show=False),
         Binding("l", "later_item", "Later", show=False),
+        Binding("o", "open_item", "Open", show=False),
         Binding("q", "quit_triage", "Quit", show=False),
         Binding("enter", "confirm_delete", "Confirm", show=False),
         Binding("escape", "cancel_delete", "Cancel", show=False),
@@ -1201,6 +1204,31 @@ class FileTriageApp(App):
             return
         self.deferred += 1
         self._advance()
+
+    def action_open_item(self) -> None:
+        if not self.triage_started or self.confirming or self.super_confirming:
+            return
+        item = self.current_item
+        if item is None:
+            return
+        path = str(item["path"])
+        try:
+            if sys.platform == "win32":
+                os.startfile(path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(
+                    ["open", path],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            else:
+                subprocess.Popen(
+                    ["xdg-open", path],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+        except Exception as exc:
+            self.notify(f"Could not open: {exc}", severity="error", timeout=4)
 
     def action_quit_triage(self) -> None:
         if not self.triage_started:
